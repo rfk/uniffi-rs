@@ -55,7 +55,7 @@
     todo!("XXX - catch_unwind like below...");
     let constructed = {{ obj.name() }}::{% call to_rs_call(cons) %}?;
     let arc = std::sync::Arc::new(constructed);
-    Ok(std::sync:Arc::into_raw(arc))
+    Ok({{ "_arc"|lower_rs(obj.type_()) }})
 {% else %}
     match std::panic::catch_unwind(|| {
         {%- if obj.threadsafe() %}
@@ -64,7 +64,7 @@
         let _new = std::sync::Mutex::new({{ obj.name() }}::{% call to_rs_call(cons) %});
         {%- endif %}
         let _arc = std::sync::Arc::new(_new);
-        std::sync::Arc::into_raw(_arc)
+        {{ "_arc"|lower_rs(obj.type_()) }}
     }) {
         Ok(ptr) => {
             *err = uniffi::deps::ffi_support::ExternError::default();
@@ -78,25 +78,16 @@
 {% endmatch %}
 {% endmacro %}
 
-{% macro get_arc(obj) -%}
-    {% if obj.threadsafe() %}
-    let _arc = unsafe { std::sync::Arc::from_raw(ptr as *const {{ obj.name() }}) };
-    {% else %}
-    let _arc = unsafe { std::sync::Arc::from_raw(ptr as *const std::sync::Mutex<{{ obj.name() }}>) };
-    {% endif %}
-    // This arc now "owns" the reference but we need an outstanding reference still.
-    std::sync::Arc::into_raw(std::sync::Arc::clone(&_arc));
-{% endmacro %}
-
-
 {% macro to_rs_method_call(obj, meth) -%}
+{% let receiver = meth.first_argument().name().to_string() %}
+{% let receiver_type =  meth.first_argument().type_() %}
 {% match meth.throws() -%}
 {% when Some with (e) -%}
     uniffi::deps::ffi_support::call_with_result(
         err,
         || -> Result<_, {{ e }}> {
-            {% call get_arc(obj) %}
-            let _retval = {{ obj.name() }}::{%- call to_rs_call_with_prefix("_arc", meth, obj) -%}?;
+            let {{ receiver }} = {{ receiver|lift_rs(receiver_type) }}
+            let _retval = {{ obj.name() }}::{%- call to_rs_call_with_prefix(receiver, meth, obj) -%}?;
             Ok({% call ret(meth) %})
         },
     )
@@ -104,8 +95,8 @@
     uniffi::deps::ffi_support::call_with_output(
         err,
         || {
-            {% call get_arc(obj) %}
-            let _retval = {{ obj.name() }}::{%- call to_rs_call_with_prefix("_arc", meth, obj) -%};
+            let {{ receiver }} = {{ receiver|lift_rs(receiver_type) }}
+            let _retval = {{ obj.name() }}::{%- call to_rs_call_with_prefix(receiver, meth, obj) -%};
             {% call ret(meth) %}
         },
     )

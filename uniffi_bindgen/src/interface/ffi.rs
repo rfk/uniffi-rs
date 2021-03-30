@@ -35,6 +35,11 @@ pub enum FFIType {
     /// If you've got one of these, you must call the appropriate rust function to free it.
     /// This is currently only used for error messages, and may go away in future.
     RustCString,
+    /// A `*const T` pointer belonging to a rust-owned `Arc<T>`.
+    /// If you've got one of these, you must call the appropriate rust function to free it.
+    /// The appropriate function will depend on the specific type `T` (which is maybe an
+    /// argument that we should include T in the tyep here, but that's for future...)
+    RustArcPtr,
     /// A byte buffer allocated by rust, and owned by whoever currently holds it.
     /// If you've got one of these, you must either call the appropriate rust function to free it
     /// or pass it to someone that will.

@@ -95,6 +95,10 @@ impl Object {
         &self.name
     }
 
+    pub fn type_(&self) -> Type {
+        Type::Object(self.name.clone())
+    }
+
     pub fn constructors(&self) -> Vec<&Constructor> {
         self.constructors.iter().collect()
     }

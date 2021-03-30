@@ -8,7 +8,7 @@ use askama::Template;
 use super::interface::*;
 
 #[derive(Template)]
-#[template(syntax = "rs", escape = "none", path = "scaffolding_template.rs")]
+#[template(syntax = "rs", escape = "none", path = "scaffolding_template.rs", print="all")]
 pub struct RustScaffolding<'a> {
     ci: &'a ComponentInterface,
     uniffi_version: &'static str,
@@ -53,9 +53,10 @@ mod filters {
             Type::Float64 => "f64".into(),
             Type::Boolean => "bool".into(),
             Type::String => "String".into(),
-            Type::Enum(name) | Type::Record(name) | Type::Object(name) | Type::Error(name) => {
+            Type::Enum(name) | Type::Record(name) | Type::Error(name) => {
                 name.clone()
             }
+            Type::Object(name) => format!("std::sync::Arc<{}>", name),
             Type::CallbackInterface(name) => format!("Box<dyn {}>", name),
             Type::Optional(t) => format!("Option<{}>", type_rs(t)?),
             Type::Sequence(t) => format!("Vec<{}>", type_rs(t)?),
@@ -76,6 +77,7 @@ mod filters {
             FFIType::Float32 => "f32".into(),
             FFIType::Float64 => "f64".into(),
             FFIType::RustCString => "*mut std::os::raw::c_char".into(),
+            FFIType::RustArcPtr => "*const std::os::raw::c_void".into(),
             FFIType::RustBuffer => "uniffi::RustBuffer".into(),
             FFIType::RustError => "uniffi::deps::ffi_support::ExternError".into(),
             FFIType::ForeignBytes => "uniffi::ForeignBytes".into(),

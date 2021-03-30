@@ -474,6 +474,55 @@ unsafe impl<V: ViaFfi> ViaFfi for HashMap<String, V> {
     }
 }
 
+/// Support for passing reference-counted shared objects via the FFI.
+///
+/// To avoid dealing with complex lifetime semantics over the FFI, any data passed
+/// by reference must be encapsulated in an `Arc`, and must be safe to share
+/// across threads.
+///
+unsafe impl<T: Sync + Send> ViaFfi for std::sync::Arc<T> {
+    type FfiType = *const T;
+
+    /// When lowering, we have an owned `Arc<T>` and we transfer that ownership
+    /// to the foreign-language code, "leaking" it out of Rust's ownership system
+    /// as a raw pointer. The foreign-language code is responsible for freeing
+    /// this via TODO calling a special destructor for `T`.
+    ///
+    /// (This works safely because we have unique ownership of `self`).
+    fn lower(self) -> Self::FfiType {
+        std::sync::Arc::into_raw(self)
+    }
+
+    /// When lifting, we receive a "borrow" of the `Arc<T>` that is owned by
+    /// the foreign-language code, and make a clone of it for our own use.
+    ///
+    /// Safety: the provided value must be a pointer previously obtained by calling
+    /// the `lower()` method of this impl.
+    fn try_lift(v: Self::FfiType) -> Result<Self> {
+        // We musn't drop the `Arc<T>` that is owned by the foreign-language code.
+        let foreign_arc = std::mem::ManuallyDrop::new(unsafe { Self::from_raw(v) });
+        // Take a clone for our own use.
+        Ok(std::sync::Arc::clone(&*foreign_arc))
+    }
+
+    /// When writing as a field of a complex structure, make a clone and transfer ownership
+    /// of it to the foreign-language code by writing its pointer into the buffer.
+    fn write<B: BufMut>(&self, buf: &mut B) {
+        let ptr = std::sync::Arc::clone(self).lower();
+        buf.put_u64(ptr as u64); // TODO: assertions about pointer size
+    }
+
+    /// When reading as a field of a complex structure, we receive a "borrow" of the `Arc<T>`
+    /// that is owned by the foreign-language code, and make a clone for our own use.
+    ///
+    /// Safety: the buffer must contain a pointer previously obtained by calling
+    /// the `lower()` method of this impl.
+    fn try_read<B: Buf>(buf: &mut B) -> Result<Self> {
+        check_remaining(buf, 8)?;
+        Self::try_lift(buf.get_u64() as *const T)
+    }
+}
+
 #[cfg(test)]
 mod test {
     #[test]
