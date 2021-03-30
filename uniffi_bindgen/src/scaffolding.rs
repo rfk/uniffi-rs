@@ -26,6 +26,7 @@ mod filters {
     use super::*;
     use std::fmt;
 
+    #[allow(dead_code)] // we should kill this if a need for it doesn't come back.
     pub fn choose(
         expr_value: &bool,
         then_value: &dyn fmt::Display,

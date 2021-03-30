@@ -45,7 +45,6 @@ pub mod deps {
     pub use anyhow;
     pub use bytes;
     pub use ffi_support;
-    pub use lazy_static;
     pub use log;
     pub use static_assertions;
 }

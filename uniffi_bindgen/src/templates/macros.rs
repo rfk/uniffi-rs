@@ -6,9 +6,14 @@
 {{ func.name() }}({% call _arg_list_rs_call(func) -%})
 {%- endmacro -%}
 
-{%- macro to_rs_call_with_prefix(prefix, func) -%}
+{%- macro to_rs_call_with_prefix(arg_name, func, obj) -%}
     {{ func.name() }}(
-    {{- prefix }}{% if func.arguments().len() > 0 %}, {% call _arg_list_rs_call(func) -%}{% endif -%}
+    {% if obj.threadsafe() %}
+    &*{{- arg_name }}
+    {% else %}
+    &mut *{{- arg_name }}.lock().unwrap()
+    {% endif %}
+    {% if func.arguments().len() > 0 %}, {% call _arg_list_rs_call(func) -%}{% endif -%}
 )
 {%- endmacro -%}
 
@@ -47,33 +52,63 @@
 {% macro to_rs_constructor_call(obj, cons) %}
 {% match cons.throws() %}
 {% when Some with (e) %}
-UNIFFI_HANDLE_MAP_{{ obj.name()|upper }}.insert_with_result(err, || -> Result<{{obj.name()}}, {{e}}> {
-    let _retval = {{ obj.name() }}::{% call to_rs_call(cons) %}?;
-    Ok(_retval)
-})
+    todo!("XXX - catch_unwind like below...");
+    let constructed = {{ obj.name() }}::{% call to_rs_call(cons) %}?;
+    let arc = std::sync::Arc::new(constructed);
+    Ok(std::sync:Arc::into_raw(arc))
 {% else %}
-UNIFFI_HANDLE_MAP_{{ obj.name()|upper }}.insert_with_output(err, || {
-    {{ obj.name() }}::{% call to_rs_call(cons) %}
-})
+    match std::panic::catch_unwind(|| {
+        {%- if obj.threadsafe() %}
+        let _new = {{ obj.name() }}::{% call to_rs_call(cons) %};
+        {%- else %}
+        let _new = std::sync::Mutex::new({{ obj.name() }}::{% call to_rs_call(cons) %});
+        {%- endif %}
+        let _arc = std::sync::Arc::new(_new);
+        std::sync::Arc::into_raw(_arc)
+    }) {
+        Ok(ptr) => {
+            *err = uniffi::deps::ffi_support::ExternError::default();
+            ptr as usize
+        },
+        Err(e) => {
+            *err = e.into();
+            0 as usize /*`std::ptr::null()` is a compile error */
+        }
+    }
 {% endmatch %}
 {% endmacro %}
 
+{% macro get_arc(obj) -%}
+    {% if obj.threadsafe() %}
+    let _arc = unsafe { std::sync::Arc::from_raw(ptr as *const {{ obj.name() }}) };
+    {% else %}
+    let _arc = unsafe { std::sync::Arc::from_raw(ptr as *const std::sync::Mutex<{{ obj.name() }}>) };
+    {% endif %}
+    // This arc now "owns" the reference but we need an outstanding reference still.
+    std::sync::Arc::into_raw(std::sync::Arc::clone(&_arc));
+{% endmacro %}
+
+
 {% macro to_rs_method_call(obj, meth) -%}
-{% let this_handle_map = format!("UNIFFI_HANDLE_MAP_{}", obj.name().to_uppercase()) -%}
-{% if !obj.threadsafe() -%}
-use uniffi::UniffiMethodCall;
-{%- endif -%}
 {% match meth.throws() -%}
 {% when Some with (e) -%}
-{{ this_handle_map }}.method_call_with_result(err, {{ meth.first_argument().name() }}, |obj| -> Result<{% call return_type_func(meth) %}, {{e}}> {
-    let _retval = {{ obj.name() }}::{%- call to_rs_call_with_prefix("obj", meth) -%}?;
-    Ok({% call ret(meth) %})
-})
+    uniffi::deps::ffi_support::call_with_result(
+        err,
+        || -> Result<_, {{ e }}> {
+            {% call get_arc(obj) %}
+            let _retval = {{ obj.name() }}::{%- call to_rs_call_with_prefix("_arc", meth, obj) -%}?;
+            Ok({% call ret(meth) %})
+        },
+    )
 {% else -%}
-{{ this_handle_map }}.method_call_with_output(err, {{ meth.first_argument().name() }}, |obj| {
-    let _retval = {{ obj.name() }}::{%- call to_rs_call_with_prefix("obj", meth) -%};
-    {% call ret(meth) %}
-})
+    uniffi::deps::ffi_support::call_with_output(
+        err,
+        || {
+            {% call get_arc(obj) %}
+            let _retval = {{ obj.name() }}::{%- call to_rs_call_with_prefix("_arc", meth, obj) -%};
+            {% call ret(meth) %}
+        },
+    )
 {% endmatch -%}
 {% endmacro -%}
 

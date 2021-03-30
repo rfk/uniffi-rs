@@ -232,6 +232,7 @@ impl Constructor {
         self.ffi_func.name.push_str("_");
         self.ffi_func.name.push_str(&self.name);
         self.ffi_func.arguments = self.arguments.iter().map(Into::into).collect();
+        // XXX - we need this to be some kind of pointer abstraction - `usize`?
         self.ffi_func.return_type = Some(FFIType::UInt64);
         Ok(())
     }
@@ -283,8 +284,8 @@ impl APIConverter<Constructor> for weedle::interface::ConstructorInterfaceMember
 
 // Represents an instance method for an object type.
 //
-// The in FFI, this will be a function whose first argument is a handle for an
-// instance of the corresponding object type.
+// The in FFI, this will be a function whose first argument is a pointer,
+// represented as an integer, to an instance of the corresponding object type.
 #[derive(Debug, Clone)]
 pub struct Method {
     pub(super) name: String,
@@ -314,7 +315,7 @@ impl Method {
 
     pub fn first_argument(&self) -> Argument {
         Argument {
-            name: "handle".to_string(),
+            name: "ptr".to_string(),
             // TODO: ideally we'd get this via `ci.resolve_type_expression` so that it
             // is contained in the proper `TypeUniverse`, but this works for now.
             type_: Type::Object(self.object_name.clone()),
